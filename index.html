@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>SincroPlay Pro P2P</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+    <style>
+        html, body { height: 100dvh; overflow: hidden; }
+        .animate-pulse-slow { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+    </style>
+</head>
+<body class="bg-zinc-950 text-white font-sans flex flex-col justify-between select-none">
+
+    <!-- PANTALLA DE CONFIGURACIÓN INICIAL -->
+    <div id="setup-screen" class="flex flex-col items-center justify-center flex-grow p-4 space-y-4 overflow-y-auto h-full">
+        <div class="text-center space-y-1">
+            <h1 class="text-3xl font-black text-indigo-500 tracking-tight">SincroPlay P2P</h1>
+            <p class="text-xs text-zinc-500">Sincronización local sin consumo de datos</p>
+        </div>
+        
+        <div class="w-full max-w-md bg-zinc-900 p-5 rounded-2xl border border-zinc-800 space-y-4 shadow-xl">
+            <!-- PASO 1 -->
+            <div class="space-y-2">
+                <div class="flex justify-between items-center">
+                    <label class="text-sm font-bold text-zinc-300">1. Selecciona tu video local</label>
+                    <span id="badge-file" class="text-[10px] bg-zinc-800 text-zinc-400 px-2.5 py-0.5 rounded-full font-semibold">Falta archivo</span>
+                </div>
+                <input type="file" id="file-input" accept="video/*" class="block w-full text-xs text-zinc-400 file:mr-3 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-bold file:bg-zinc-800 file:text-zinc-200 hover:file:bg-zinc-700 file:transition cursor-pointer border border-zinc-800 p-1.5 rounded-xl bg-zinc-950" />
+            </div>
+
+            <!-- PASO 2 -->
+            <div id="control-area" class="hidden space-y-4 pt-3 border-t border-zinc-800">
+                <label class="block text-sm font-bold text-zinc-300">2. Control de la Sala</label>
+                
+                <button id="btn-create-room" class="w-full bg-indigo-600 hover:bg-indigo-700 py-3 rounded-xl font-bold text-sm transition shadow-lg shadow-indigo-900/20 active:scale-[0.99]">
+                    Crear Nueva Sala
+                </button>
+                
+                <!-- ZONA DE ENLACE Y COPIADO -->
+                <div id="share-link-area" class="hidden p-3 bg-zinc-950 rounded-xl border border-zinc-800 space-y-2">
+                    <div class="flex justify-between items-center">
+                        <span class="text-[11px] text-emerald-400 font-bold flex items-center gap-1">
+                            <span class="w-2 h-2 bg-emerald-500 rounded-full animate-ping"></span> Sala Activa
+                        </span>
+                        <span id="user-count-setup" class="text-[11px] text-zinc-400 font-mono">👥 Conectados: 1/2</span>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <input type="text" id="share-link" readonly class="flex-grow bg-zinc-900 border border-zinc-800 p-2 rounded-lg text-xs text-indigo-300 outline-none font-mono truncate" />
+                        <button id="btn-copy" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-lg text-xs font-bold transition flex items-center space-x-1 active:scale-95 shrink-0">
+                            <span id="btn-copy-text">Copiar</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- INDICADOR DE ESTADO VISUAL -->
+                <div id="status-card" class="hidden p-3 rounded-xl border text-center text-xs font-bold transition-all duration-300">
+                    <span id="status-text">Iniciando...</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- CONSOLA INFORMATIVA -->
+        <div class="w-full max-w-md bg-black rounded-xl p-3 border border-zinc-800 font-mono text-[11px] h-24 overflow-y-auto">
+            <div id="status-logs" class="space-y-0.5 text-zinc-500">
+                <p>> Esperando archivo de video local...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- REPRODUCTOR Y CHAT -->
+    <div id="main-app" class="hidden flex flex-col h-full w-full overflow-hidden">
+        
+        <!-- CABECERA SUPERIOR DE INFORMACIÓN -->
+        <div class="bg-zinc-950 px-4 py-2 flex justify-between items-center border-b border-zinc-900 text-xs">
+            <span class="text-zinc-400 font-medium truncate max-w-[60%]" id="playing-filename">Video Sincronizado</span>
+            <span id="user-count-app" class="bg-emerald-950 text-emerald-400 border border-emerald-900/60 px-2.5 py-0.5 rounded-full font-bold font-mono">
+                👥 Conectados: 2/2
+            </span>
+        </div>
+
+        <!-- CONTENEDOR DEL VIDEO (45% Alto) -->
+        <div class="bg-black flex items-center justify-center w-full h-[43dvh] border-b border-zinc-800 relative">
+            <video id="video-player" controls playsinline class="w-full h-full object-contain"></video>
+        </div>
+
+        <!-- CONTENEDOR DEL CHAT (57% Alto restante) -->
+        <div class="flex flex-col h-[57dvh] bg-zinc-900 overflow-hidden">
+            <div id="chat-messages" class="flex-grow p-4 overflow-y-auto space-y-2 text-xs font-medium">
+                <div class="text-zinc-500 text-[11px] italic text-center bg-zinc-950/40 py-1.5 rounded-lg border border-zinc-800/50">
+                    ¡Conexión P2P en vivo! Cualquiera puede pausar, adelantar o retrasar el video.
+                </div>
+            </div>
+
+            <form id="chat-form" class="p-3 bg-zinc-950 flex space-x-2 border-t border-zinc-800 sticky bottom-0">
+                <input type="text" id="chat-input" placeholder="Escribe un mensaje..." autocomplete="off" class="flex-grow bg-zinc-900 border border-zinc-800 px-4 py-2.5 rounded-full text-xs focus:outline-none focus:border-indigo-500 text-white" />
+                <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 px-5 rounded-full font-bold text-xs transition">
+                    Enviar
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        const fileInput = document.getElementById('file-input');
+        const badgeFile = document.getElementById('badge-file');
+        const setupScreen = document.getElementById('setup-screen');
+        const controlArea = document.getElementById('control-area');
+        const mainApp = document.getElementById('main-app');
+        const videoPlayer = document.getElementById('video-player');
+        const logsContainer = document.getElementById('status-logs');
+        const btnCreateRoom = document.getElementById('btn-create-room');
+        const shareLinkArea = document.getElementById('share-link-area');
+        const shareLinkInput = document.getElementById('share-link');
+        const btnCopy = document.getElementById('btn-copy');
+        const btnCopyText = document.getElementById('btn-copy-text');
+        const statusCard = document.getElementById('status-card');
+        const statusText = document.getElementById('status-text');
+        const userCountSetup = document.getElementById('user-count-setup');
+        const userCountApp = document.getElementById('user-count-app');
+        const playingFilename = document.getElementById('playing-filename');
+        const chatMessages = document.getElementById('chat-messages');
+        const chatForm = document.getElementById('chat-form');
+        const chatInput = document.getElementById('chat-input');
+
+        let peer = null;
+        let conn = null;
+        let blockEvents = false; 
+
+        function log(message, type = 'info') {
+            const p = document.createElement('p');
+            if (type === 'error') p.className = 'text-red-400 font-bold';
+            else if (type === 'success') p.className = 'text-emerald-400 font-bold';
+            else p.className = 'text-zinc-400';
+            p.textContent = `> ${message}`;
+            logsContainer.appendChild(p);
+            logsContainer.scrollTop = logsContainer.scrollHeight;
+        }
+
+        function updateStatusCard(text, styleClass) {
+            statusCard.className = `p-3 rounded-xl border text-center text-xs font-bold transition-all duration-300 ${styleClass}`;
+            statusText.textContent = text;
+            statusCard.classList.remove('hidden');
+        }
+
+        const peerOptions = {
+            config: {
+                iceServers: [
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'stun:stun1.l.google.com:19302' },
+                    { urls: 'stun:stun2.l.google.com:19302' },
+                    { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+                    { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' }
+                ]
+            }
+        };
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const roomIdFromUrl = urlParams.get('room');
+
+        // 1. Carga del archivo local
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                videoPlayer.src = URL.createObjectURL(file);
+                playingFilename.textContent = file.name;
+                badgeFile.textContent = "Listo";
+                badgeFile.className = "text-[10px] bg-emerald-950 text-emerald-400 px-2.5 py-0.5 rounded-full font-semibold border border-emerald-900/50";
+                log(`Archivo [${file.name}] cargado localmente.`, 'success');
+                controlArea.classList.remove('hidden');
+
+                if (roomIdFromUrl) {
+                    updateStatusCard('Enlace detectado. Conectando a la sala...', 'bg-yellow-950/40 text-yellow-400 border-yellow-900/50 animate-pulse-slow');
+                    initPeer(false);
+                } else {
+                    updateStatusCard('Listo para crear o iniciar sincronización.', 'bg-zinc-950 text-zinc-400 border-zinc-800');
+                }
+            }
+        });
+
+        // 2. Inicialización PeerJS
+        function initPeer(isHost) {
+            log('Estableciendo nodo de comunicación pública...', 'info');
+            peer = new Peer(peerOptions);
+
+            peer.on('open', (id) => {
+                log(`Conexión exitosa con el servidor central.`, 'success');
+                if (isHost) {
+                    const cleanPath = window.location.origin + window.location.pathname;
+                    shareLinkInput.value = `${cleanPath}?room=${id}`;
+                    shareLinkArea.classList.remove('hidden');
+                    
+                    btnCreateRoom.classList.add('hidden');
+                    updateStatusCard('Esperando a que tu amigo abra el enlace...', 'bg-yellow-950/40 text-yellow-400 border-yellow-900/50 animate-pulse-slow');
+                    userCountSetup.textContent = "👥 Conectados: 1/2 (Tú)";
+                } else {
+                    log(`Solicitando túnel directo P2P con el host...`, 'info');
+                    connectToHost(roomIdFromUrl);
+                }
+            });
+
+            peer.on('connection', (connection) => {
+                if (isHost) {
+                    log('¡Tu amigo se ha conectado a la sala!', 'success');
+                    conn = connection;
+                    userCountSetup.textContent = "👥 Conectados: 2/2";
+                    updateStatusCard('¡Amigo conectado! Abriendo interfaz...', 'bg-emerald-950/50 text-emerald-400 border-emerald-900/60');
+                    bindConnectionEvents();
+                }
+            });
+
+            peer.on('error', (err) => {
+                log(`Error de red: ${err.type}`, 'error');
+                updateStatusCard(`Error: ${err.type}. Revisa tu red.`, 'bg-red-950/40 text-red-400 border-red-900/50');
+            });
+        }
+
+        btnCreateRoom.addEventListener('click', () => initPeer(true));
+
+        function connectToHost(hostId) {
+            conn = peer.connect(hostId, { reliable: true });
+            bindConnectionEvents();
+        }
+
+        // 3. Gestión y Sincronización del Canal de Datos
+        function bindConnectionEvents() {
+            conn.on('open', () => {
+                userCountApp.textContent = "👥 Conectados: 2/2";
+                setTimeout(() => {
+                    setupScreen.classList.add('hidden');
+                    mainApp.classList.remove('hidden');
+                }, 1000);
+            });
+
+            conn.on('data', (data) => {
+                if (!data || !data.type) return;
+                
+                blockEvents = true;
+
+                if (data.type === 'play') {
+                    videoPlayer.currentTime = data.time;
+                    videoPlayer.play().catch(() => {});
+                    appendSystemMessage("Tu amigo le dio Play");
+                } else if (data.type === 'pause') {
+                    videoPlayer.pause();
+                    videoPlayer.currentTime = data.time;
+                    appendSystemMessage("Tu amigo pausó el video");
+                } else if (data.type === 'seek') {
+                    videoPlayer.currentTime = data.time;
+                    appendSystemMessage(`Cambio de tiempo: ${formatTime(data.time)}`);
+                } else if (data.type === 'chat') {
+                    appendMessage("Amigo", data.text);
+                }
+
+                setTimeout(() => { blockEvents = false; }, 400);
+            });
+
+            conn.on('close', () => {
+                alert('Tu amigo se ha desconectado de la sala.');
+                window.location.reload();
+            });
+        }
+
+        // Emitir acciones del reproductor local
+        function emitVideoEvent(type) {
+            if (blockEvents || !conn || !conn.open) return;
+            conn.send({
+                type: type,
+                time: videoPlayer.currentTime
+            });
+        }
+
+        videoPlayer.addEventListener('play', () => emitVideoEvent('play'));
+        videoPlayer.addEventListener('pause', () => {
+            if (!videoPlayer.seeking) emitVideoEvent('pause');
+        });
+        videoPlayer.addEventListener('seeked', () => emitVideoEvent('seek'));
+
+        // Funcionalidad interactiva de Copiado del Enlace
+        btnCopy.addEventListener('click', () => {
+            shareLinkInput.select();
+            shareLinkInput.setSelectionRange(0, 99999); // Para móviles
+            
+            navigator.clipboard.writeText(shareLinkInput.value).then(() => {
+                btnCopyText.textContent = "¡Copiado!";
+                btnCopy.classList.replace('bg-indigo-600', 'bg-emerald-600');
+                
+                setTimeout(() => {
+                    btnCopyText.textContent = "Copiar";
+                    btnCopy.classList.replace('bg-emerald-600', 'bg-indigo-600');
+                }, 2000);
+            }).catch(() => {
+                log('No se pudo copiar automáticamente. Selecciónalo manualmente.', 'error');
+            });
+        });
+
+        // Sistema de mensajería del chat
+        chatForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const text = chatInput.value.trim();
+            if (!text) return;
+
+            if (conn && conn.open) {
+                conn.send({ type: 'chat', text: text });
+            }
+
+            appendMessage("Tú", text);
+            chatInput.value = '';
+        });
+
+        function appendMessage(sender, text) {
+            const msgEl = document.createElement('div');
+            const color = sender === "Tú" ? "text-indigo-400" : "text-emerald-400";
+            msgEl.innerHTML = `<span class="${color} font-bold">${sender}:</span> <span class="text-zinc-100">${text}</span>`;
+            chatMessages.appendChild(msgEl);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        function appendSystemMessage(text) {
+            const msgEl = document.createElement('div');
+            msgEl.className = "text-zinc-500 text-[10px] italic text-center py-0.5 bg-zinc-950/20 rounded my-0.5";
+            msgEl.textContent = text;
+            chatMessages.appendChild(msgEl);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        function formatTime(secs) {
+            const m = Math.floor(secs / 60);
+            const s = Math.floor(secs % 60);
+            return `${m}:${s < 10 ? '0' : ''}${s}`;
+        }
+    </script>
+</body>
+</html>
